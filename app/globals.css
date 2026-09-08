@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-cairo), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-marhey), var(--font-cairo), sans-serif;
+
+  --color-cream: #fdf8f1;
+  --color-blush: #fdeef1;
+  --color-rosie: #e2597e;
+  --color-rosie-strong: #c7416a;
+  --color-rosie-soft: #f6b9c9;
+  --color-cocoa: #4c3a3f;
+  --color-cocoa-soft: #7a6369;
+  --color-sand: #f4e4d4;
+  --color-goldy: #e8a95c;
+  --color-lilac: #d9c4ee;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-cream);
+  color: var(--color-cocoa);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--color-rosie-soft);
+  color: var(--color-cocoa);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-rosie-soft);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer utilities {
+  .masonry {
+    column-gap: 1rem;
+    column-fill: balance;
+  }
+  .masonry > * {
+    break-inside: avoid;
+    margin-bottom: 1rem;
+  }
+
+  .card-hover {
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 28px -8px rgb(76 58 63 / 0.18);
+  }
+
+  .soft-shadow {
+    box-shadow: 0 8px 30px -12px rgb(76 58 63 / 0.16);
+  }
+
+  .text-shadow-soft {
+    text-shadow: 0 1px 8px rgb(76 58 63 / 0.35);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+}
+
+@keyframes hobna-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-pop {
+  animation: hobna-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes hobna-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-rise {
+  animation: hobna-rise 0.4s ease both;
+}
+
+@keyframes hobna-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.animate-float {
+  animation: hobna-float 4s ease-in-out infinite;
+}
+
+@keyframes hobna-heartbeat {
+  0%, 40%, 100% { transform: scale(1); }
+  20% { transform: scale(1.35); }
+}
+.animate-heartbeat {
+  animation: hobna-heartbeat 0.7s ease;
+}
+
+input[type="date"],
+input[type="time"],
+input[type="month"] {
+  direction: rtl;
+}

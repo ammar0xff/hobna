@@ -1,0 +1,23 @@
+services:
+  hobna:
+    build: .
+    image: hobna:latest
+    container_name: hobna
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - AMMAR_PASSWORD=ammar1234
+      - ALAA_PASSWORD=alaa1234
+    volumes:
+      - hobna_data:/app/data
+    ports:
+      - "8789:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  hobna_data:
