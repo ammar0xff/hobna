@@ -2,127 +2,131 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, Heart, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { Heart, Eye, EyeOff } from "lucide-react";
+import GoogleButton from "./google-button";
 
 export default function LoginForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function submit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
+
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
       });
+
+      const data = await res.json();
+
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || "حصلت مشكلة، جرب تاني");
+        setError(data.error || "حصلت مشكلة");
         return;
       }
-      router.replace("/");
+
+      router.push("/");
       router.refresh();
+    } catch {
+      setError("ما قدرنا نوصل للخادم");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 py-10">
-      <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-rosie-soft/30 blur-3xl" />
-        <div className="absolute bottom-0 -left-24 h-80 w-80 rounded-full bg-lilac/30 blur-3xl" />
-      </div>
-
-      <div className="relative w-full max-w-md animate-rise">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <div className="animate-float">
-            <Heart className="h-14 w-14 fill-rosie text-rosie" />
+    <div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-cream via-white to-blush px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-rosie/10 shadow-lg shadow-rosie/10">
+            <Heart className="h-10 w-10 text-rosie" fill="currentColor" />
           </div>
-          <h1 className="font-display mt-4 text-4xl font-bold text-rosie-strong">حبّنا</h1>
-          <p className="mt-2 text-sm text-cocoa-soft">
-            هنا بنحفظ أحلى ذكرياتنا… صورنا وفيديوهاتنا ولحظاتنا المخصوصة 💛
-          </p>
+          <h1 className="text-3xl font-bold">هُبنة</h1>
+          <p className="mt-2 text-cocoa-soft">ألبوم خاص فينا</p>
         </div>
 
-        <form
-          onSubmit={submit}
-          className="soft-shadow rounded-3xl border border-blush bg-white/80 p-6 backdrop-blur sm:p-8"
-        >
-          <h2 className="text-lg font-bold">أهلاً بيك تاني يا حبيبي 😍</h2>
-          <p className="mt-1 text-sm text-cocoa-soft">سجل دخولك عشان نكمل الحكاية</p>
-
-          <label className="mt-6 block text-sm font-semibold">
-            اسم المستخدم
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoFocus
-              required
-              autoComplete="username"
-              className="mt-2 w-full rounded-2xl border border-sand bg-cream px-4 py-3 outline-none transition focus:border-rosie focus:ring-4 focus:ring-rosie/15"
-              placeholder="مثال: ammar"
-            />
-          </label>
-
-          <label className="mt-4 block text-sm font-semibold">
-            الباسورد
-            <div className="relative mt-2">
+        <div className="rounded-3xl border border-sand bg-white/80 p-8 shadow-xl backdrop-blur">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="username" className="mb-1.5 block text-sm font-semibold">
+                اسم المستخدم
+              </label>
               <input
-                type={showPw ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                id="username"
+                type="text"
                 required
-                autoComplete="current-password"
-                className="w-full rounded-2xl border border-sand bg-cream px-4 py-3 pl-12 outline-none transition focus:border-rosie focus:ring-4 focus:ring-rosie/15"
-                placeholder="••••••••"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full rounded-2xl border border-sand bg-white px-4 py-3 outline-none transition focus:border-rosie focus:ring-2 focus:ring-rosie/20"
+                placeholder="amine"
               />
-              <button
-                type="button"
-                onClick={() => setShowPw((s) => !s)}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-cocoa-soft hover:text-rosie"
-                aria-label="إظهار الباسورد"
-              >
-                {showPw ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-              </button>
             </div>
-          </label>
 
-          {error && (
-            <p className="mt-4 rounded-2xl bg-blush px-4 py-3 text-sm font-semibold text-rosie-strong">
-              {error}
-            </p>
-          )}
+            <div>
+              <label htmlFor="password" className="mb-1.5 block text-sm font-semibold">
+                كلمة المرور
+              </label>
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-2xl border border-sand bg-white px-4 py-3 pr-12 outline-none transition focus:border-rosie focus:ring-2 focus:ring-rosie/20"
+                  placeholder="••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-cocoa-soft transition hover:text-cocoa"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-l from-rosie to-rosie-strong py-3.5 font-bold text-white shadow-lg shadow-rosie/30 transition hover:brightness-105 active:scale-[0.98] disabled:opacity-60"
-          >
-            {loading ? (
-              <span className="flex items-center gap-2">
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                لحظة…
-              </span>
-            ) : (
-              <>
-                <Lock className="h-5 w-5" />
-                ادخل على ذاكرتنا
-              </>
+            {error && (
+              <div className="rounded-2xl bg-red-50 p-3 text-center text-sm text-red-500">
+                {error}
+              </div>
             )}
-          </button>
 
-          <p className="mt-5 text-center text-xs text-cocoa-soft">
-            كل واحد مننا بيدخل بأكونته الخاص 😉
-          </p>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-2xl bg-gradient-to-l from-rosie to-rosie-strong py-3.5 text-lg font-bold text-white shadow-lg shadow-rosie/25 transition hover:brightness-105 active:scale-[0.98] disabled:opacity-50"
+            >
+              {loading ? (
+                <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              ) : (
+                "ادخل"
+              )}
+            </button>
+          </form>
+
+          <div className="my-5 flex items-center gap-3">
+            <div className="h-px flex-1 bg-sand" />
+            <span className="text-xs text-cocoa-soft">أو</span>
+            <div className="h-px flex-1 bg-sand" />
+          </div>
+
+          <GoogleButton />
+        </div>
+
+        <p className="mt-6 text-center text-xs text-cocoa-soft/60">
+          لو عندك مشكلة تواصل مع مدير السيرفر
+        </p>
       </div>
     </div>
   );
