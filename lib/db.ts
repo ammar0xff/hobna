@@ -26,11 +26,12 @@ db.exec(`
   );
 `);
 
-// Migration: add google_id if missing
+// Migration: add google_id if missing (SQLite can't ADD COLUMN UNIQUE)
 const userCols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
 if (!userCols.some((c) => c.name === "google_id")) {
-  db.exec("ALTER TABLE users ADD COLUMN google_id TEXT UNIQUE");
+  db.exec("ALTER TABLE users ADD COLUMN google_id TEXT");
 }
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS uploads (
