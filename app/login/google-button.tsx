@@ -1,12 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { isGoogleEnabled } from "@/lib/google";
 
 export default function GoogleButton() {
   const [loading, setLoading] = useState(false);
-
-  if (!isGoogleEnabled) return null;
 
   async function handleClick() {
     setLoading(true);
