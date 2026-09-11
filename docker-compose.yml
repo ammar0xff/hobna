@@ -5,12 +5,12 @@ services:
     container_name: hobna
     restart: unless-stopped
     environment:
-      - PORT=3000
-      - AMMAR_PASSWORD=ammar1234
-      - ALAA_PASSWORD=alaa1234
-      - GOOGLE_CLIENT_ID=629345404612-o215mbr2f5v2s3jpi24re8r4sgntq5c3.apps.googleusercontent.com
-      - GOOGLE_CLIENT_SECRET=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
-      - GOOGLE_REDIRECT_URI=http://hobna.homie.local/api/auth/google/callback
+      - PORT=${PORT:-3000}
+      - AMMAR_PASSWORD=${AMMAR_PASSWORD:?set AMMAR_PASSWORD in your .env}
+      - ALAA_PASSWORD=${ALAA_PASSWORD:?set ALAA_PASSWORD in your .env}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:3000/api/auth/google/callback}
     volumes:
       - hobna_data:/app/data
     ports:
