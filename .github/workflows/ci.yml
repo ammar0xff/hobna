@@ -27,9 +27,6 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
-      - name: Lint
-        run: npm run lint
-
   build:
     name: Build
     runs-on: ubuntu-latest

@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ connected: false, available: false });
   }
 
-  const token = getValidAccessToken(user.id);
+  const token = await getValidAccessToken(user.id);
   if (!token) {
     return NextResponse.json({ connected: false, available: true });
   }

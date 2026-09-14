@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
-import path from "node:path";
+import { Readable } from "node:stream";
 import { apiUser, isUnauthorized } from "@/lib/auth";
-import { assetDir, db } from "@/lib/db";
-import { readVariant, getMimeForExt, EXT_MAP } from "@/lib/storage";
+import { db } from "@/lib/db";
+import { variantPath } from "@/lib/media";
+import type { Variant } from "@/lib/media";
 
 export const runtime = "nodejs";
 
@@ -31,52 +32,69 @@ export async function GET(
 ) {
   const user = apiUser(request);
   if (!user) return isUnauthorized(request);
-
   const { id } = await params;
+
+  const asset = db
+    .prepare("SELECT id, type, ext FROM assets WHERE id = ?")
+    .get(id) as { id: string; type: "image" | "video"; ext: string } | undefined;
+  if (!asset) return NextResponse.json({ error: "مش موجود" }, { status: 404 });
+
   const url = new URL(request.url);
-  const variant = (url.searchParams.get("variant") || "orig") as "orig" | "thumb" | "med" | "poster";
+  const variant = (url.searchParams.get("v") ?? "orig") as Variant;
 
-  const asset = db.prepare("SELECT * FROM assets WHERE id = ?").get(id) as
-    | { id: string; type: string }
-    | undefined;
-
-  if (!asset) {
+  if (variant !== "orig" && variant !== "thumb" && variant !== "med" && variant !== "poster") {
     return NextResponse.json({ error: "مش موجود" }, { status: 404 });
   }
 
-  const row = db.prepare(
-    "SELECT u.filename FROM asset_files af JOIN uploads u ON af.upload_id = u.id WHERE af.asset_id = ? LIMIT 1"
-  ).get(id) as { filename: string } | undefined;
+  let filePath: string;
+  let mime: string;
 
-  const ext = row?.filename?.split(".").pop()?.toLowerCase() || "";
-  const mime = MIME[ext] || "application/octet-stream";
-
-  // For 'orig', try to serve the actual file
   if (variant === "orig") {
-    const localDir = assetDir(id);
-    const origPath = path.join(localDir, `orig.${ext}`);
-    if (fs.existsSync(origPath)) {
-      const data = fs.readFileSync(origPath);
-      return new NextResponse(data, {
-        headers: {
-          "Content-Type": mime,
-          "Cache-Control": "public, max-age=86400, immutable",
-        },
-      });
-    }
-    return NextResponse.json({ error: "الملف مش موجود" }, { status: 404 });
+    filePath = variantPath(id, "orig", asset.ext);
+    mime = MIME[asset.ext] || (asset.type === "video" ? "video/mp4" : "application/octet-stream");
+  } else if (variant === "poster") {
+    filePath = variantPath(id, "poster");
+    mime = "image/jpeg";
+  } else {
+    filePath = variantPath(id, variant);
+    mime = "image/webp";
   }
 
-  // For processed variants
-  try {
-    const result = await readVariant(id, variant, ext, mime);
-    return new NextResponse(result.buffer, {
-      headers: {
-        "Content-Type": result.mimeType,
-        "Cache-Control": "public, max-age=86400, immutable",
-      },
-    });
-  } catch {
-    return NextResponse.json({ error: "الملف مش موجود" }, { status: 404 });
+  if (!fs.existsSync(filePath)) {
+    return NextResponse.json({ error: "الملف لسه بيتجهز" }, { status: 404 });
   }
+
+  const stat = fs.statSync(filePath);
+  const cacheHeaders = {
+    "cache-control": "private, max-age=31536000, immutable",
+    "accept-ranges": "bytes",
+  };
+
+  const range = request.headers.get("range");
+
+  if (range) {
+    const match = range.match(/bytes=(\d*)-(\d*)/);
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0;
+      const end = match[2] ? Math.min(parseInt(match[2], 10), stat.size - 1) : stat.size - 1;
+      if (start < stat.size && start <= end) {
+        const headers = new Headers({
+          ...cacheHeaders,
+          "content-type": mime,
+          "content-length": String(end - start + 1),
+          "content-range": `bytes ${start}-${end}/${stat.size}`,
+        });
+        const stream = Readable.toWeb(fs.createReadStream(filePath, { start, end }));
+        return new Response(stream as ReadableStream, { status: 206, headers });
+      }
+    }
+  }
+
+  const headers = new Headers({
+    ...cacheHeaders,
+    "content-type": mime,
+    "content-length": String(stat.size),
+  });
+  const stream = Readable.toWeb(fs.createReadStream(filePath));
+  return new Response(stream as ReadableStream, { status: 200, headers });
 }

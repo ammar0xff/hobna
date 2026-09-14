@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
-import crypto from "node:crypto";
+import { Readable } from "node:stream";
 import fs from "node:fs";
 import path from "node:path";
 import { apiUser, isUnauthorized } from "@/lib/auth";
 import { db, assetDir } from "@/lib/db";
-import { processAsset } from "@/lib/media";
+import { listAssets } from "@/lib/queries";
+import { processAsset, variantPath } from "@/lib/media";
+import { uid } from "@/lib/util";
 
 export const runtime = "nodejs";
 
-const MAX_SIZE = 100 * 1024 * 1024;
-const ALLOWED = /^(image|video)\//;
+const MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB per file
 
-function detectType(mime: string): "photo" | "video" {
-  return mime.startsWith("video/") ? "video" : "photo";
+function badRequest(message: string) {
+  return NextResponse.json({ error: message }, { status: 400 });
 }
 
 export async function GET(request: Request) {
@@ -20,87 +21,131 @@ export async function GET(request: Request) {
   if (!user) return isUnauthorized(request);
 
   const url = new URL(request.url);
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
-  const offset = parseInt(url.searchParams.get("offset") || "0", 10);
-  const sort = url.searchParams.get("sort") === "newest" ? "newest" : "oldest";
-
-  const orderBy = sort === "newest" ? "a.date DESC, a.created_at DESC" : "a.date ASC, a.created_at ASC";
-
-  const assets = db
-    .prepare(
-      `SELECT a.*, u.name as author_name,
-        (SELECT COUNT(*) FROM comments WHERE asset_id = a.id) as comment_count,
-        (SELECT GROUP_CONCAT(ar.user_id) FROM asset_reactions ar WHERE ar.asset_id = a.id) as reacted_by,
-        (SELECT GROUP_CONCAT(ar.emoji) FROM asset_reactions ar WHERE ar.asset_id = a.id) as reaction_emojis
-       FROM assets a
-       LEFT JOIN users u ON a.added_by = u.id
-       ORDER BY ${orderBy}
-       LIMIT ? OFFSET ?`
-    )
-    .all(limit, offset) as any[];
-
-  const assetsWithUser = assets.map((a: any) => {
-    const reactions = a.reaction_emojis
-      ? a.reaction_emojis.split(",").map((emoji: string, i: number) => ({
-          emoji,
-          by: parseInt(a.reacted_by.split(",")[i]),
-          mine: parseInt(a.reacted_by.split(",")[i]) === user.id,
-        }))
-      : [];
-    return { ...a, reactions, author_name: a.author_name || "مستخدم" };
-  });
-
-  return NextResponse.json(assetsWithUser);
+  const params = {
+    type: url.searchParams.get("type") ?? undefined,
+    person: url.searchParams.get("person") ?? undefined,
+    search: url.searchParams.get("search") ?? undefined,
+    eventId: url.searchParams.get("event") ?? undefined,
+    yearMonth: url.searchParams.get("month") ?? undefined,
+  };
+  const assets = listAssets(params);
+  return NextResponse.json({ assets });
 }
 
 export async function POST(request: Request) {
   const user = apiUser(request);
   if (!user) return isUnauthorized(request);
 
-  const form = await request.formData();
-  const files = form.getAll("files") as File[];
-  const dateVal = (form.get("date") as string) || null;
-
-  if (!files.length) {
-    return NextResponse.json({ error: "ما اختاريتي شي" }, { status: 400 });
+  if (!request.body) return badRequest("مفيش ملف وصل");
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (contentLength > MAX_BYTES) {
+    return badRequest("الملف كبير قوي (أقصى حاجة ٢ جيجا)");
   }
 
-  const created: string[] = [];
+  const decode = (h: string | null) =>
+    h ? decodeURIComponent(h).slice(0, 300) : "";
+  const origName = decode(request.headers.get("x-file-name"));
+  if (!origName) return badRequest("مفيش اسم للملف");
+  const takenAt = request.headers.get("x-taken-at") || new Date().toISOString();
+  const person = request.headers.get("x-person") || "";
+  const caption = decode(request.headers.get("x-caption"));
+  const typeHeader = request.headers.get("x-type") || "";
+  const contentType = request.headers.get("content-type") || "";
 
-  for (const file of files) {
-    if (file.size > MAX_SIZE) {
-      return NextResponse.json({ error: `الملف ${file.name} كبير جداً (حد أقصى 100MB)` }, { status: 400 });
+  const ext = path.extname(origName).toLowerCase().replace(".", "").slice(0, 8);
+  const type: "image" | "video" =
+    typeHeader === "video" ||
+    (contentType.startsWith("video/") && typeHeader !== "image")
+      ? "video"
+      : "image";
+
+  const id = uid();
+  const dir = assetDir(id);
+  fs.mkdirSync(dir, { recursive: true });
+  const origPath = variantPath(id, "orig", ext);
+
+  let size = 0;
+  try {
+    const ws = fs.createWriteStream(origPath, { flags: "wx" });
+    await new Promise<void>((resolve, reject) => {
+      const stream = Readable.fromWeb(request.body as any);
+      stream.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > MAX_BYTES) {
+          ws.destroy();
+          reject(new Error("ملف كبير جداً"));
+        }
+      });
+      stream.on("error", (e) => {
+        ws.destroy();
+        reject(e);
+      });
+      ws.on("error", reject);
+      ws.on("finish", resolve);
+      stream.pipe(ws);
+    });
+
+    if (size === 0) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return badRequest("الملف فاضي");
     }
-    if (!ALLOWED.test(file.type)) {
-      return NextResponse.json({ error: `الملف ${file.name} نوعه مش مدعوم` }, { status: 400 });
-    }
 
-    const id = crypto.randomUUID();
-    const type = detectType(file.type);
-    const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
-
-    const assetDate = dateVal || new Date().toISOString().split("T")[0];
-
-    db.prepare(
-      "INSERT INTO assets (id, type, title, date, added_by) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, type, file.name, assetDate, user.id);
-
-    const buf = Buffer.from(await file.arrayBuffer());
-    const dir = assetDir(id);
-    const origPath = path.join(dir, `orig.${ext}`);
-    fs.writeFileSync(origPath, buf);
-
+    let info: { width: number; height: number; duration: number } = {
+      width: 0,
+      height: 0,
+      duration: 0,
+    };
     try {
-      await processAsset(id, type === "photo" ? "image" : "video", ext, origPath);
+      info = await processAsset(id, type, ext, origPath);
     } catch (e) {
-      console.error("[media] processing failed", id, e);
+      console.error("process asset failed", e);
     }
 
-    db.prepare("INSERT INTO uploads (id, user_id, filename, original_name, size, mime) VALUES (?, ?, ?, ?, ?, ?)").run(id, user.id, file.name, file.name, file.size, file.type);
-    db.prepare("INSERT INTO asset_files (asset_id, upload_id, role) VALUES (?, ?, 'orig')").run(id, id);
+    const validPerson = ["ammar", "alaa", "both"].includes(person) ? person : null;
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO assets (id, type, ext, orig_name, size, width, height, duration,
+        taken_at, person, caption, created_by, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      id,
+      type,
+      ext,
+      origName,
+      size,
+      info.width || null,
+      info.height || null,
+      info.duration || null,
+      takenAt,
+      validPerson,
+      caption,
+      user.id,
+      now
+    );
 
-    created.push(id);
+    return NextResponse.json({
+      asset: {
+        id,
+        type,
+        ext,
+        orig_name: origName,
+        size,
+        width: info.width,
+        height: info.height,
+        duration: info.duration,
+        taken_at: takenAt,
+        person: validPerson,
+        caption,
+        created_by: user.id,
+        created_at: now,
+      },
+    });
+  } catch (e: any) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    console.error("upload error", e);
+    return NextResponse.json(
+      { error: "حصلت مشكلة في الرفع، جرب تاني" },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ created });
 }

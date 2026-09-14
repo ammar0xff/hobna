@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Settings, LogOut, HardDrive, CheckCircle2, AlertCircle, Unplug, Loader2 } from "lucide-react";
 
 interface DriveStatus {

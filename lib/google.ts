@@ -121,7 +121,7 @@ export async function createDriveFolder(accessToken: string, parentId?: string):
     fileMetadata.parents = [parentId];
   }
   const file = await drive.files.create({
-    resource: fileMetadata as any,
+    requestBody: fileMetadata as any,
     fields: "id",
   });
   return file.data.id!;
@@ -151,7 +151,7 @@ export async function uploadToDrive(
   });
 
   const file = await drive.files.create({
-    resource: fileMetadata,
+    requestBody: fileMetadata,
     media: { mimeType, body },
     fields: "id",
   });

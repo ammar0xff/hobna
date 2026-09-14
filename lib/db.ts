@@ -7,12 +7,12 @@ const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "hobna.db");
 const MEDIA_DIR = path.join(DATA_DIR, "media");
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 const db = new Database(DB_PATH);
 
 db.pragma("journal_mode = WAL");
+db.pragma("busy_timeout = 5000");
 db.pragma("foreign_keys = ON");
 
 db.exec(`
@@ -21,133 +21,115 @@ db.exec(`
     username TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL DEFAULT '',
-    google_id TEXT UNIQUE,
+    google_id TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK (type IN ('image','video')),
+    ext TEXT NOT NULL,
+    orig_name TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    width INTEGER,
+    height INTEGER,
+    duration REAL,
+    taken_at TEXT NOT NULL,
+    person TEXT CHECK (person IN ('ammar','alaa','both')),
+    caption TEXT DEFAULT '',
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    drive_file_id TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_assets_taken_at ON assets (taken_at);
+  CREATE INDEX IF NOT EXISTS idx_assets_type ON assets (type);
+  CREATE INDEX IF NOT EXISTS idx_assets_person ON assets (person);
+
+  CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    cover_asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS event_assets (
+    event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (event_id, asset_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS likes (
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (asset_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS user_tokens (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    access_token TEXT NOT NULL DEFAULT '',
+    refresh_token TEXT,
+    expires_at INTEGER NOT NULL DEFAULT 0,
+    drive_folder_id TEXT DEFAULT ''
   );
 `);
 
-// Migration: add google_id if missing (SQLite can't ADD COLUMN UNIQUE)
+// Migration: SQLite can't ADD COLUMN UNIQUE, so uniqueness is a partial index.
 const userCols = db.prepare("PRAGMA table_info(users)").all() as { name: string }[];
 if (!userCols.some((c) => c.name === "google_id")) {
   db.exec("ALTER TABLE users ADD COLUMN google_id TEXT");
 }
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL");
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS uploads (
-    id TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    filename TEXT NOT NULL,
-    original_name TEXT NOT NULL,
-    size INTEGER NOT NULL DEFAULT 0,
-    mime TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS assets (
-    id TEXT PRIMARY KEY,
-    type TEXT NOT NULL DEFAULT 'photo',
-    title TEXT NOT NULL DEFAULT '',
-    caption TEXT NOT NULL DEFAULT '',
-    date TEXT,
-    added_by INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
-  );
-`);
-
-// Migration: add drive_file_id if missing
-const assetCols = db.prepare("PRAGMA table_info(assets)").all() as { name: string }[];
-if (!assetCols.some((c) => c.name === "drive_file_id")) {
-  db.exec("ALTER TABLE assets ADD COLUMN drive_file_id TEXT");
-}
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS asset_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_id TEXT NOT NULL,
-    upload_id TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'orig',
-    UNIQUE(asset_id, upload_id),
-    FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
-    FOREIGN KEY (upload_id) REFERENCES uploads(id) ON DELETE CASCADE
-  );
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    asset_id TEXT NOT NULL,
-    user_id INTEGER NOT NULL,
-    text TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS asset_reactions (
-    asset_id TEXT NOT NULL,
-    user_id INTEGER NOT NULL,
-    emoji TEXT NOT NULL DEFAULT '❤️',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (asset_id, user_id),
-    FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-
-// Sessions table
-db.exec(`
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-
-// User tokens for Google Drive
-db.exec(`
-  CREATE TABLE IF NOT EXISTS user_tokens (
-    user_id INTEGER PRIMARY KEY,
-    access_token TEXT NOT NULL DEFAULT '',
-    refresh_token TEXT,
-    expires_at INTEGER NOT NULL DEFAULT 0,
-    drive_folder_id TEXT DEFAULT '',
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-`);
-
-// Migration: ensure refresh_token column exists (for older DBs)
-const tokenCols = db.prepare("PRAGMA table_info(user_tokens)").all() as { name: string }[];
-if (!tokenCols.some((c) => c.name === "refresh_token")) {
-  db.exec("ALTER TABLE user_tokens ADD COLUMN refresh_token TEXT");
-}
-
-// Seed default users if none exist
+// Seed default users if none exist.
+// next build evaluates route modules in parallel workers, each initializing the
+// DB; INSERT OR IGNORE + transaction keeps concurrent seeding from racing on the
+// UNIQUE users.username index.
 const userCount = (db.prepare("SELECT COUNT(*) as c FROM users").get() as { c: number }).c;
 if (userCount === 0) {
-  const now = new Date().toISOString();
-  const insertUser = db.prepare(
-    "INSERT INTO users (username, name, password_hash, created_at) VALUES (?, ?, ?, ?)"
-  );
-
-  const users = [
-    { username: "ammar", name: "Ammar" },
-    { username: "laila", name: "Laila" },
-  ];
-
-  for (const u of users) {
-    const pw = "1234";
+  const hash = (pw: string) => {
     const salt = crypto.randomBytes(16).toString("hex");
     const derived = crypto.scryptSync(pw, salt, 64).toString("hex");
-    const hash = `${salt}:${derived}`;
-    insertUser.run(u.username, u.name, hash, now);
+    return `${salt}:${derived}`;
+  };
+
+  const now = new Date().toISOString();
+  const insertUser = db.prepare(
+    "INSERT OR IGNORE INTO users (username, name, password_hash, created_at) VALUES (?,?,?,?)"
+  );
+
+  const ammarPw = process.env.AMMAR_PASSWORD || "ammar1234";
+  const alaaPw = process.env.ALAA_PASSWORD || "alaa1234";
+
+  const seed = db.transaction(() => {
+    insertUser.run("ammar", "عمار", hash(ammarPw), now);
+    insertUser.run("alaa", "آلاء", hash(alaaPw), now);
+  });
+  try {
+    seed();
+    console.log("[hobna] Seeded users: ammar, alaa");
+  } catch (e) {
+    // Another process already seeded; ignore.
+    if (!String(e).includes("UNIQUE")) throw e;
   }
 }
 
